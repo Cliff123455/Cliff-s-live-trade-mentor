@@ -14,6 +14,7 @@ class CH:
     PERFORMANCE_UPDATES = "scalpbot:performance-updates"
     DAILY_HALT          = "scalpbot:risk:daily-halt"
     MARKET_REGIME       = "scalpbot:market-regime"
+    MARKOV_PREDICTION   = "scalpbot:markov-prediction"
 
 
 # ── Shared state store keys ───────────────────────────────────────────────────
@@ -31,6 +32,7 @@ class SK:
     MODELS          = "state:models"             # OpenRouter model IDs per agent
     WATCHLIST       = "state:watchlist"          # JSON list of user-added tickers
     MARKET_REGIME   = "state:market-regime"     # JSON regime object from The Pulse
+    MARKOV_STATE    = "state:markov"           # JSON Markov prediction from The Oracle
 
 
 # ── Agent names ───────────────────────────────────────────────────────────────
@@ -44,8 +46,9 @@ class AGENTS:
     WATCHER    = "watcher"
     HISTORIAN  = "historian"
     PULSE      = "pulse"
+    ORACLE     = "oracle"
 
-    ALL = [SCANNER, WIRE, CHARTIST, ACTUARY, GENERAL, SNIPER, WATCHER, HISTORIAN, PULSE]
+    ALL = [SCANNER, WIRE, CHARTIST, ACTUARY, GENERAL, SNIPER, WATCHER, HISTORIAN, PULSE, ORACLE]
 
 
 # ── Default OpenRouter model IDs per agent ────────────────────────────────────
@@ -59,6 +62,7 @@ DEFAULT_MODELS = {
     AGENTS.WATCHER:   "google/gemini-2.0-flash-001",
     AGENTS.HISTORIAN: "anthropic/claude-haiku-4-5-20251001",
     AGENTS.PULSE:     "google/gemini-2.0-flash-001",  # No LLM calls — placeholder only
+    AGENTS.ORACLE:    "google/gemini-2.0-flash-001",  # No LLM calls — pure math
 }
 
 

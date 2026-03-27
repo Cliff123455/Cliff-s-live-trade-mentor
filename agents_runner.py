@@ -74,6 +74,7 @@ async def _clean_state(redis_url: str):
         "state:positions", "state:pending-orders", "state:daily-pnl",
         "state:risk-params", "state:setups", "state:setup-weights",
         "state:trade-log", "state:sim-clock", "state:market-regime",
+        "state:markov",
     ]
     for key in keys:
         await r.delete(key)
@@ -97,9 +98,11 @@ async def main_live():
     from src.execution.order_execution_agent import OrderExecutionAgent
     from src.execution.position_monitor_agent import PositionMonitorAgent
     from src.agents.market_pulse_agent import MarketPulseAgent
+    from src.agents.markov_regime_agent import MarkovRegimeAgent
 
     agent_classes = [
         (MarketPulseAgent,       "The Pulse",     {}),
+        (MarkovRegimeAgent,      "The Oracle",    {}),
         (MarketDataAgent,        "The Scanner",   {}),
         (NewsSentimentAgent,     "The Wire",      {}),
         (TechnicalAnalysisAgent, "The Chartist",  {}),
@@ -152,9 +155,11 @@ async def main_backtest(date: str, speed: float, tickers: list[str] | None,
     from src.execution.position_monitor_agent import PositionMonitorAgent
     from src.agents.performance_agent import PerformanceAgent
     from src.agents.market_pulse_agent import MarketPulseAgent
+    from src.agents.markov_regime_agent import MarkovRegimeAgent
 
     agent_specs = [
         (MarketPulseAgent,       "The Pulse",            {}),
+        (MarkovRegimeAgent,      "The Oracle",           {}),
         (ReplayScanner,          "The Scanner (Replay)", {"replay_date": date, "speed": speed, "watchlist": tickers}),
         (TechnicalAnalysisAgent, "The Chartist",         {}),
         (RiskModelingAgent,      "The Actuary",          {}),

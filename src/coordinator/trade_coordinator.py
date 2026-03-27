@@ -102,6 +102,16 @@ class TradeCoordinator(BaseAgent):
             pass
         return None
 
+    async def _get_markov(self) -> dict | None:
+        """Read current Markov prediction from The Oracle via Redis state."""
+        try:
+            raw = await self.state_get(SK.MARKOV_STATE)
+            if raw:
+                return json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            pass
+        return None
+
     async def _ticker_in_cooldown(self, ticker: str) -> bool:
         last = self.ticker_cooldowns.get(ticker)
         if last is None:
@@ -110,8 +120,9 @@ class TradeCoordinator(BaseAgent):
         return (now_s - last) < self._cooldown_s
 
     def _compute_conviction(self, setup: dict, catalyst: dict | None,
-                            now: dtime | None = None, regime: dict | None = None) -> float:
-        """Return conviction score on 0–10 scale, adjusted by market regime."""
+                            now: dtime | None = None, regime: dict | None = None,
+                            markov: dict | None = None) -> float:
+        """Return conviction score on 0–10 scale, adjusted by market regime and Markov prediction."""
         w = self._weights
         setup_quality_norm = float(setup.get("quality_score", 5.0)) / 10.0
         # Default 0.65 (slightly bullish neutral) when Wire has no catalyst data yet
@@ -139,6 +150,27 @@ class TradeCoordinator(BaseAgent):
                 conviction *= 0.75   # 25% penalty for shorts in bullish tape
             elif regime_state == REGIME_RISK_OFF:
                 conviction *= 0.50   # 50% penalty in risk-off (Actuary should block too)
+
+        # ── Markov prediction adjustment ───────────────────────────────────
+        # The Oracle provides a conviction_adjustment (±0.20 max) scaled by
+        # its own confidence.  Apply it directionally: a bullish Markov
+        # prediction boosts longs and penalises shorts, and vice versa.
+        if markov and markov.get("observations", 0) >= 25:
+            adjustment = float(markov.get("conviction_adjustment", 0.0))
+            direction = setup.get("direction", "long")
+            markov_bias = markov.get("bias", "NEUTRAL")
+
+            # Flip sign when Markov bias opposes trade direction
+            if direction == "long" and markov_bias == "BEARISH":
+                adjustment = -abs(adjustment)
+            elif direction == "short" and markov_bias == "BULLISH":
+                adjustment = -abs(adjustment)
+            elif direction == "long" and markov_bias == "BULLISH":
+                adjustment = abs(adjustment)
+            elif direction == "short" and markov_bias == "BEARISH":
+                adjustment = abs(adjustment)
+
+            conviction += adjustment
 
         return round(conviction, 3)
 
@@ -202,6 +234,14 @@ class TradeCoordinator(BaseAgent):
                       regime=msg.get("regime"), bias=msg.get("bias"),
                       spy=msg.get("spy_change_pct"), vix=msg.get("vix"))
 
+    async def _handle_markov_update(self, msg: dict) -> None:
+        """Log Markov prediction updates — actual read happens in _evaluate via Redis."""
+        self.log.info("markov_update",
+                      predicted=msg.get("predicted_next_state"),
+                      confidence=msg.get("prediction_confidence"),
+                      bias=msg.get("bias"),
+                      adjustment=msg.get("conviction_adjustment"))
+
     async def _handle_daily_halt(self, msg: dict) -> None:
         self.halted = True
         self.log.warning("daily_halt_received", reason=msg.get("reason"), msg=msg)
@@ -254,12 +294,13 @@ class TradeCoordinator(BaseAgent):
                 "entry_price": 0, "stop_price": 0, "target_price": 0, "approved_shares": 0})
             return
 
-        # ── Read market regime ────────────────────────────────────────────────
+        # ── Read market regime + Markov prediction ─────────────────────────
         regime = await self._get_regime()
+        markov = await self._get_markov()
 
-        # ── Conviction score (regime-adjusted) ───────────────────────────────
+        # ── Conviction score (regime + Markov adjusted) ──────────────────────
         catalyst = self.catalyst_cache.get(ticker)
-        score = self._compute_conviction(setup, catalyst, now, regime)
+        score = self._compute_conviction(setup, catalyst, now, regime, markov)
         threshold = await self._get_threshold(now)
 
         # Apply regime-based dynamic threshold floor from Pulse
@@ -281,6 +322,8 @@ class TradeCoordinator(BaseAgent):
             threshold=threshold,
             prime=self._in_prime_window(now),
             regime=regime.get("regime") if regime else "unknown",
+            markov_state=markov.get("predicted_next_state") if markov else "n/a",
+            markov_adj=markov.get("conviction_adjustment", 0) if markov else 0,
         )
 
         # ── LLM tie-breaker for borderline cases ──────────────────────────────
@@ -349,6 +392,16 @@ class TradeCoordinator(BaseAgent):
                 f"VIX: {regime.get('vix', 0)}"
             )
 
+        markov_context = ""
+        markov = await self._get_markov()
+        if markov and markov.get("observations", 0) >= 25:
+            markov_context = (
+                f"\nMarkov Prediction: {markov.get('predicted_next_state', 'unknown')} | "
+                f"Confidence: {markov.get('prediction_confidence', 0):.0%} | "
+                f"Bias: {markov.get('bias', 'NEUTRAL')} | "
+                f"Conviction Adj: {markov.get('conviction_adjustment', 0):+.2f}"
+            )
+
         system_prompt = (
             "You are The General, a calm decisive trading coordinator. "
             "You synthesize signals and make the final call. Be conservative. "
@@ -362,7 +415,8 @@ class TradeCoordinator(BaseAgent):
             f"Conviction score: {score}\n"
             f"Time of day: {now.strftime('%H:%M')}\n"
             f"Decision threshold: {threshold}\n"
-            f"{regime_context}\n\n"
+            f"{regime_context}"
+            f"{markov_context}\n\n"
             'Should I enter this trade? Return JSON: {"action": "enter" or "pass", "rationale": "one sentence"}'
         )
 
@@ -454,6 +508,7 @@ class TradeCoordinator(BaseAgent):
             CH.PERFORMANCE_UPDATES,
             CH.DAILY_HALT,
             CH.MARKET_REGIME,
+            CH.MARKOV_PREDICTION,
         )
 
         self.log.info(
@@ -483,6 +538,8 @@ class TradeCoordinator(BaseAgent):
                 await self._handle_performance_update(msg)
             elif msg_type == "regime":
                 await self._handle_regime_update(msg)
+            elif msg_type == "markov":
+                await self._handle_markov_update(msg)
             elif msg_type == "halt":
                 await self._handle_daily_halt(msg)
             else:
@@ -502,6 +559,9 @@ def _classify_message(msg: dict) -> str:
     # Market regime updates from The Pulse
     if "regime" in msg and "bias" in msg and "long_conviction_floor" in msg:
         return "regime"
+    # Markov prediction updates from The Oracle
+    if "predicted_next_state" in msg and "conviction_adjustment" in msg:
+        return "markov"
     if "halt" in str(msg.get("type", "")).lower() or msg.get("halt"):
         return "halt"
     # Fallback: DAILY_HALT messages often carry a "reason" and agent="actuary"
