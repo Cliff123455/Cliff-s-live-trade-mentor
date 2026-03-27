@@ -1,0 +1,27 @@
+# config/exit-rules.yaml
+# The Watcher reads this at startup.
+
+# ── Hard stop ───────────────────────────────────────────────────────────────
+# The Chartist/Actuary set the initial stop price on every trade.
+# The Watcher enforces it. This is the floor — you always have a stop.
+
+# ── Trailing stop (percentage-based) ────────────────────────────────────────
+# Once price moves this % above entry (longs) or below entry (shorts),
+# activate a trailing stop. Set to 0.5 = 0.5%.
+trailing_stop_activation_pct: 0.5
+
+# The trailing stop trails this % behind the current price.
+# Set to 0.25 = 0.25%. So if a stock is up 1%, the trail is at +0.75%.
+trailing_stop_trail_pct: 0.25
+
+# ── Target hit ──────────────────────────────────────────────────────────────
+# Set to false to disable hard target exits (let winners run with trailing stop)
+use_target_exit: false
+
+# ── Time exit ───────────────────────────────────────────────────────────────
+# Close any position open longer than this (minutes). 0 = disabled.
+time_exit_minutes: 30
+
+# ── Poll interval ──────────────────────────────────────────────────────────
+# How often The Watcher checks positions (seconds)
+poll_interval_s: 1.0

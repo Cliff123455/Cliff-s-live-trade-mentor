@@ -1,0 +1,67 @@
+# config/indicators.yaml
+# The Chartist and Scanner read this at startup.
+
+# EMA periods (calculated on 1-min bars)
+ema_periods: [5, 9, 21]
+
+# RSI
+rsi_period: 14
+rsi_oversold: 35
+rsi_overbought: 65
+
+# ATR
+atr_period: 14
+
+# VWAP — recalculated from session open each day
+vwap_enabled: true
+
+# Volume confirmation — a bar's volume must exceed this multiple of avg to count
+volume_confirmation_multiplier: 1.5
+
+# Minimum quality score to publish a setup (1–10 scale)
+min_publish_quality: 5
+
+# ── Dynamic Screener ─────────────────────────────────────────────────────────
+screener:
+  enabled: True          # disabled until screener API is stable
+  min_price: 10.0
+  max_price: 90.0
+  candidates: 50
+  top_n: 20
+  refresh_minutes: 30
+  min_trade_count: 10000
+
+# Hardcoded watchlist of liquid $10-$90 stocks
+# These stream directly without any screener API calls
+fallback_watchlist:
+  - IREN    # Iris Energy (Bitcoin mining)
+  - INTC    # Intel
+  - CRWV    # CoreWeave
+  - SOXL    # Semis 3x bull
+  - TQQQ    # Nasdaq 3x bull
+  - SQQQ    # Nasdaq 3x bear
+  - SMCI    # Super Micro Computer
+  - APLD    # Applied Technologies
+  - UVXY    # VIX short-term futures
+  - MU      # Micron Technology
+  - PLTR    # Palantir
+  - LABU    # Biotech 3x bull
+
+
+# ── X (Twitter) Feed ──────────────────────────────────────────────────────
+# The Wire polls X for cashtag mentions and specific accounts.
+# Add accounts to x_accounts to track (without @).
+x_accounts: []
+  # - unusual_whales
+  # - DeItaone
+  # - zaborskisworld
+
+# How often to poll X (seconds)
+x_poll_interval_s: 60
+
+# Bar timeframe for technical analysis
+bar_timeframe: "1Min"
+
+# How many bars of history to load at session open
+history_bars: 60
+

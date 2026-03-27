@@ -1,0 +1,39 @@
+# config/session.yaml
+# The General reads this at startup.
+
+# Trading hours (Eastern Time — NYSE session)
+# NOTE: extended to 20:00 for after-hours paper testing — revert to 16:00 for live
+session_open: "09:30"
+session_close: "20:00"
+
+# High-volume windows — The General lowers conviction threshold during these
+prime_windows:
+  - start: "09:30"
+    end: "11:00"
+    label: "morning_open"
+  - start: "15:00"
+    end: "20:00"
+    label: "power_hour"
+
+# Conviction threshold to emit a ENTER directive (0–10 scale)
+# NOTE: lowered to 5.5 while Wire/Historian warm up (no catalyst/perf data yet)
+# Raise back to 7.0 once Wire has a session of catalyst history
+conviction_enter_threshold: 5.5
+
+# Raised threshold outside prime windows
+# NOTE: lowered to 5.5 while Wire has no catalyst data — impossible to hit 7.0
+# without catalysts. Raise back to 7.0 once Wire is active.
+conviction_enter_threshold_off_hours: 5.5
+
+# Conviction score formula weights (must sum to 1.0)
+conviction_weights:
+  setup_quality: 0.40
+  catalyst_score: 0.30
+  setup_weight: 0.20
+  time_of_day_bonus: 0.10
+
+# Maximum directives per session (circuit breaker — prevents runaway trading)
+max_directives_per_session: 20
+
+# Cooldown between directives on the same ticker (seconds)
+same_ticker_cooldown_s: 300

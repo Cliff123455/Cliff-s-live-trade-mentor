@@ -1,0 +1,2262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScalpBot // CliffClaw — Dashboard</title>
+  <meta name="description" content="ScalpBot live agent activity dashboard — monitor what each agent is thinking and doing in real time.">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg:        #07070f;
+      --surface:   #0e0e1a;
+      --sidebar:   #0b0b16;
+      --card:      #12122a;
+      --card-hov:  #16163a;
+      --border:    #22224a;
+      --accent:    #e94560;
+      --accent2:   #f5a623;
+      --green:     #2ecc71;
+      --cyan:      #00d4ff;
+      --purple:    #a855f7;
+      --gray:      #44446a;
+      --text:      #dde0f0;
+      --muted:     #7777aa;
+      --font:      'Courier New', Courier, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      line-height: 1.5;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ─────────────────────────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 100;
+    }
+    .logo {
+      font-size: 15px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(233,69,96,0.5);
+      white-space: nowrap;
+    }
+    .topbar-pnl {
+      font-size: 18px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      transition: color 0.4s;
+      white-space: nowrap;
+    }
+    .topbar-pnl.pos { color: var(--green); }
+    .topbar-pnl.neg { color: var(--accent); }
+    .topbar-pnl.zero { color: var(--muted); }
+    .topbar-spacer { flex: 1; }
+    .badge {
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      white-space: nowrap;
+    }
+    .badge-paper   { background: rgba(90,90,200,0.2); border: 1px solid #5a5ac8; color: #9999ee; }
+    .badge-halted  { background: rgba(233,69,96,0.2); border: 1px solid var(--accent); color: var(--accent); animation: pulse 1s infinite; }
+    #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); transition: background 0.4s; flex-shrink: 0; }
+    #conn-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    .btn-launch {
+      padding: 7px 18px;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-launch.start { background: var(--accent); color: #fff; box-shadow: 0 0 16px rgba(233,69,96,0.4); }
+    .btn-launch.start:hover { background: #ff2d52; box-shadow: 0 0 26px rgba(233,69,96,0.7); }
+    .btn-launch.stop  { background: #22224a; color: var(--muted); border: 1px solid var(--border); }
+    .btn-launch.stop:hover { background: #2a2a5a; color: var(--text); }
+    .btn-launch:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-estop {
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border: 2px solid #ff4444;
+      background: rgba(255,40,40,0.15);
+      color: #ff6666;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-estop:hover { background: rgba(255,40,40,0.4); color: #fff; box-shadow: 0 0 20px rgba(255,40,40,0.6); }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+    /* ── Body layout (sidebar + main) ────────────────────────────────────── */
+    #body-wrap {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────────────── */
+    #sidebar {
+      width: 270px;
+      min-width: 270px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    #sidebar::-webkit-scrollbar { width: 4px; }
+    #sidebar::-webkit-scrollbar-track { background: transparent; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sidebar-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .sidebar-label {
+      font-size: 9px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    /* Collapsible sidebar sections */
+    .sidebar-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .sidebar-toggle:hover .sidebar-label { color: var(--text); }
+    .sidebar-toggle .chevron {
+      font-size: 10px;
+      color: var(--muted);
+      transition: transform 0.2s;
+    }
+    .sidebar-toggle.collapsed .chevron { transform: rotate(-90deg); }
+    .sidebar-body { overflow: hidden; transition: max-height 0.3s ease, opacity 0.2s; max-height: 2000px; opacity: 1; }
+    .sidebar-body.collapsed { max-height: 0; opacity: 0; padding: 0; }
+
+    /* Account summary */
+    .acct-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .acct-item {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .acct-item.wide { grid-column: 1 / -1; }
+    .acct-lbl { font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+    .acct-val { font-size: 13px; font-weight: bold; color: var(--text); font-variant-numeric: tabular-nums; }
+    .acct-val.pos { color: var(--green); }
+    .acct-val.neg { color: var(--accent); }
+    .acct-val.big { font-size: 16px; }
+
+    /* Trade rules */
+    .rules-grid { display: flex; flex-direction: column; gap: 8px; }
+    .rule-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .rule-lbl { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+    .rule-input {
+      width: 80px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 4px 7px;
+      outline: none;
+      text-align: right;
+      transition: border-color 0.2s;
+    }
+    .rule-input:focus { border-color: var(--accent); }
+    .rule-input.saved { border-color: var(--green); }
+
+    /* Agent rows in sidebar */
+    .agent-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .agent-item {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .agent-item-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.5s, box-shadow 0.5s;
+    }
+    .status-dot.running { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.stopped { background: var(--gray); }
+    .status-dot.error   { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1s infinite; }
+    .agent-name-label { font-size: 11px; font-weight: bold; color: var(--text); }
+    .agent-tier-label { font-size: 9px; color: var(--muted); margin-left: auto; }
+
+    .model-row {
+      display: flex;
+      gap: 5px;
+    }
+    .model-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 10px;
+      padding: 4px 7px;
+      outline: none;
+      min-width: 0;
+      transition: border-color 0.2s;
+    }
+    .model-input:focus { border-color: var(--accent); }
+    .btn-save {
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 10px;
+      padding: 4px 8px;
+      transition: all 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-save:hover { background: var(--accent); color: #fff; }
+    .btn-save.saved { border-color: var(--green); color: var(--green); }
+
+    /* Positions table in sidebar */
+    .pos-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    .pos-table th {
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 3px 4px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .pos-table td { padding: 4px; border-bottom: 1px solid rgba(34,34,74,0.5); }
+    .no-pos { color: var(--muted); font-size: 11px; text-align: center; padding: 12px 0; }
+    .tag-long  { color: var(--green); font-weight: bold; }
+    .tag-short { color: var(--accent); font-weight: bold; }
+
+    .sidebar-footer {
+      padding: 12px 16px;
+      color: var(--muted);
+      font-size: 9px;
+      letter-spacing: 1px;
+      margin-top: auto;
+    }
+
+    /* ── Positions bar (below top bar) ───────────────────────────────────── */
+    #positions-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      flex-shrink: 0;
+      max-height: 240px;
+      overflow: hidden;
+      transition: max-height 0.3s, padding 0.3s;
+    }
+    #positions-bar.empty { max-height: 0; padding: 0 16px; }
+    #positions-bar.has-positions { max-height: 240px; padding: 8px 16px; }
+    .posbar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .posbar-label {
+      font-size: 9px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .posbar-summary {
+      font-size: 11px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+    }
+    .posbar-summary.pos { color: var(--green); }
+    .posbar-summary.neg { color: var(--accent); }
+    .posbar-summary.zero { color: var(--muted); }
+    .posbar-scroll {
+      overflow-y: auto;
+      max-height: 190px;
+    }
+    .posbar-scroll::-webkit-scrollbar { width: 4px; }
+    .posbar-scroll::-webkit-scrollbar-track { background: transparent; }
+    .posbar-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .posbar-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .posbar-table th {
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 4px 6px;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    .posbar-table th:first-child { text-align: left; }
+    .posbar-table th:nth-child(2) { text-align: center; }
+    .posbar-table td {
+      padding: 5px 6px;
+      border-bottom: 1px solid rgba(34,34,74,0.4);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .posbar-table td:first-child { text-align: left; font-weight: bold; letter-spacing: 0.5px; }
+    .posbar-table td:nth-child(2) { text-align: center; }
+    .posbar-table tr:hover { background: rgba(233,69,96,0.04); }
+    .dir-tag {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+      font-weight: bold;
+    }
+    .dir-tag.long  { background: rgba(46,204,113,0.15); color: var(--green); }
+    .dir-tag.short { background: rgba(233,69,96,0.15); color: var(--accent); }
+    .posbar-pnl-cell { font-weight: bold; }
+    .posbar-pnl-cell.pos { color: var(--green); }
+    .posbar-pnl-cell.neg { color: var(--accent); }
+
+    /* Liquidate button */
+    .btn-liquidate {
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-family: var(--font);
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border: 1px solid #ff4444;
+      background: rgba(255,40,40,0.1);
+      color: #ff6666;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-liquidate:hover { background: rgba(255,40,40,0.3); color: #fff; }
+    .btn-liquidate.confirm {
+      background: #ff4444;
+      color: #fff;
+      animation: pulse 0.6s infinite;
+    }
+    .btn-liquidate:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Main agent output area ────────────────────────────────────────────── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    #main::-webkit-scrollbar { width: 5px; }
+    #main::-webkit-scrollbar-track { background: transparent; }
+    #main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Compact row — Scanner, Wire, Watcher, Historian */
+    .agent-row-compact {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .agent-pane.compact {
+      max-height: 120px;
+      min-height: 80px;
+    }
+    .agent-pane.compact .pane-log {
+      font-size: 9px;
+      max-height: 70px;
+    }
+    .agent-pane.compact .pane-header {
+      padding: 5px 10px;
+    }
+    .agent-pane.compact .pane-title { font-size: 10px; }
+    .agent-pane.compact .pane-empty { font-size: 9px; }
+    .agent-pane.compact .pane-empty-icon { font-size: 14px; }
+
+    /* Priority row — Chartist, Actuary, General, Sniper (2×2 grid) */
+    .agent-row-priority {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 8px;
+      flex: 1;
+      min-height: 400px;
+    }
+
+    .agent-pane {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: border-color 0.3s, box-shadow 0.3s;
+      min-height: 0;
+    }
+    .agent-pane.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 16px rgba(233,69,96,0.12), inset 0 0 20px rgba(233,69,96,0.03);
+    }
+    .agent-pane.running {
+      border-color: var(--green);
+      box-shadow: 0 0 14px rgba(46,204,113,0.1);
+    }
+
+    .pane-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .pane-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--gray);
+      flex-shrink: 0;
+      transition: background 0.4s, box-shadow 0.4s;
+    }
+    .pane-dot.running { background: var(--green); box-shadow: 0 0 6px var(--green); animation: blink 2s infinite; }
+    .pane-dot.error   { background: var(--accent); animation: pulse 0.8s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .pane-title { font-size: 11px; font-weight: bold; letter-spacing: 1px; }
+    .pane-channel {
+      font-size: 9px;
+      color: var(--muted);
+      margin-left: auto;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+    .pane-count {
+      font-size: 9px;
+      background: var(--border);
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 1px 6px;
+      flex-shrink: 0;
+    }
+    .pane-timer {
+      font-size: 9px;
+      color: var(--green);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.5px;
+    }
+    .pane-last {
+      font-size: 9px;
+      color: var(--muted);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .log-entry.pipeline-timing { border-left-color: var(--cyan); opacity: 0.75; }
+
+
+    .pane-log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 0;
+    }
+    .pane-log::-webkit-scrollbar { width: 4px; }
+    .pane-log::-webkit-scrollbar-track { background: transparent; }
+    .pane-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-entry {
+      display: flex;
+      gap: 6px;
+      font-size: 10px;
+      line-height: 1.4;
+      padding: 3px 4px;
+      border-radius: 3px;
+      border-left: 2px solid transparent;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform:none; } }
+
+    .log-entry.market   { border-left-color: var(--cyan); }
+    .log-entry.catalyst { border-left-color: var(--accent2); }
+    .log-entry.setup    { border-left-color: var(--purple); }
+    .log-entry.risk     { border-left-color: var(--accent); }
+    .log-entry.directive{ border-left-color: var(--green); background: rgba(46,204,113,0.04); }
+    .log-entry.fill     { border-left-color: var(--green); }
+    .log-entry.exit     { border-left-color: #ff6b35; }
+    .log-entry.perf     { border-left-color: var(--muted); }
+    .log-entry.halt     { border-left-color: var(--accent); background: rgba(233,69,96,0.08); }
+
+    .log-ts { color: var(--muted); flex-shrink: 0; width: 45px; }
+    .log-body { flex: 1; color: var(--text); word-break: break-word; }
+    .log-key  { color: var(--cyan); }
+    .log-val  { color: var(--accent2); }
+    .log-ticker { color: var(--green); font-weight: bold; }
+    .log-action.enter  { color: var(--green); font-weight: bold; }
+    .log-action.pass   { color: var(--muted); }
+    .log-action.vetoed { color: var(--accent); }
+
+    .pane-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gray);
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .pane-empty-icon { font-size: 22px; opacity: 0.3; }
+
+    /* ── Mentor chat panel ───────────────────────────────────────────────── */
+    #mentor-panel {
+      width: 0;
+      min-width: 0;
+      background: var(--sidebar);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: width 0.3s ease, min-width 0.3s ease;
+    }
+    #mentor-panel.open {
+      width: 380px;
+      min-width: 380px;
+    }
+    .mentor-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .mentor-title {
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: var(--accent2);
+    }
+    .mentor-model-tag {
+      font-size: 9px;
+      color: var(--muted);
+      margin-left: auto;
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-mentor-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .btn-mentor-close:hover { color: var(--text); }
+
+    /* Model selector row */
+    .mentor-model-row {
+      display: flex;
+      gap: 6px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .mentor-model-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 10px;
+      padding: 5px 8px;
+      outline: none;
+      min-width: 0;
+      transition: border-color 0.2s;
+    }
+    .mentor-model-input:focus { border-color: var(--accent2); }
+    .mentor-model-input.saved { border-color: var(--green); }
+    .btn-mentor-model-save {
+      background: transparent;
+      border: 1px solid var(--accent2);
+      color: var(--accent2);
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 10px;
+      padding: 4px 10px;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .btn-mentor-model-save:hover { background: var(--accent2); color: #000; }
+    .btn-mentor-model-save.saved { border-color: var(--green); color: var(--green); }
+
+    /* Messages area */
+    .mentor-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+    }
+    .mentor-messages::-webkit-scrollbar { width: 4px; }
+    .mentor-messages::-webkit-scrollbar-track { background: transparent; }
+    .mentor-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .mentor-msg {
+      max-width: 92%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.5;
+      animation: fadeIn 0.3s ease;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .mentor-msg.user {
+      align-self: flex-end;
+      background: rgba(233,69,96,0.15);
+      border: 1px solid rgba(233,69,96,0.3);
+      color: var(--text);
+    }
+    .mentor-msg.ai {
+      align-self: flex-start;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .mentor-msg.thinking {
+      align-self: flex-start;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-style: italic;
+    }
+    .mentor-msg.error {
+      align-self: center;
+      background: rgba(233,69,96,0.1);
+      border: 1px solid rgba(233,69,96,0.3);
+      color: var(--accent);
+      font-size: 10px;
+    }
+    .mentor-msg .msg-model {
+      display: block;
+      font-size: 9px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Empty state */
+    .mentor-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      color: var(--gray);
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-align: center;
+      padding: 20px;
+    }
+    .mentor-empty-icon { font-size: 28px; opacity: 0.3; }
+
+    /* Input area */
+    .mentor-input-area {
+      display: flex;
+      gap: 6px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .mentor-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 8px 12px;
+      outline: none;
+      resize: none;
+      min-height: 36px;
+      max-height: 80px;
+      transition: border-color 0.2s;
+    }
+    .mentor-input:focus { border-color: var(--accent2); }
+    .mentor-input:disabled { opacity: 0.5; }
+    .btn-mentor-send {
+      background: var(--accent2);
+      border: none;
+      border-radius: 6px;
+      color: #000;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: bold;
+      padding: 8px 14px;
+      transition: all 0.2s;
+      flex-shrink: 0;
+      align-self: flex-end;
+    }
+    .btn-mentor-send:hover { background: #ffc040; box-shadow: 0 0 12px rgba(245,166,35,0.4); }
+    .btn-mentor-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Toggle button in top bar */
+    .btn-mentor-toggle {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      cursor: pointer;
+      border: 1px solid var(--accent2);
+      background: rgba(245,166,35,0.1);
+      color: var(--accent2);
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-mentor-toggle:hover { background: rgba(245,166,35,0.25); box-shadow: 0 0 12px rgba(245,166,35,0.3); }
+    .btn-mentor-toggle.active { background: var(--accent2); color: #000; }
+
+    /* ── Mode selector + Backtest controls ─────────────────────────────── */
+    .mode-selector {
+      display: flex;
+      gap: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 6px 0;
+      text-align: center;
+      font-family: var(--font);
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      cursor: pointer;
+      border: none;
+      background: var(--bg);
+      color: var(--muted);
+      transition: all 0.2s;
+    }
+    .mode-btn:hover { color: var(--text); background: var(--card); }
+    .mode-btn.active-live { background: var(--green); color: #000; }
+    .mode-btn.active-backtest { background: var(--cyan); color: #000; }
+
+    .backtest-controls {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .backtest-controls.visible { display: flex; }
+
+    .bt-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .bt-lbl { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+    .bt-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 5px 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .bt-input:focus { border-color: var(--cyan); }
+    .bt-select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 5px 8px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Replay clock banner */
+    #replay-banner {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 6px 20px;
+      background: rgba(0,212,255,0.08);
+      border-bottom: 1px solid rgba(0,212,255,0.3);
+      font-size: 11px;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+    #replay-banner.active { display: flex; }
+    .replay-time {
+      font-size: 14px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+    }
+    .replay-progress {
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <div class="logo">SCALPBOT // CLIFFCLAW</div>
+  <div class="topbar-pnl zero" id="daily-pnl">+$0.00</div>
+  <div class="topbar-spacer"></div>
+  <div id="conn-dot" title="WebSocket"></div>
+  <button class="btn-launch start" id="btn-launch" onclick="toggleAgents()">⚡ Launch Agents</button>
+  <button class="btn-estop" id="btn-estop" onclick="emergencyStop()" title="Kill all agents and stop the server">🛑 E-STOP</button>
+  <button class="btn-mentor-toggle" id="btn-mentor-toggle" onclick="toggleMentorPanel()">MENTOR</button>
+  <span class="badge badge-paper" id="mode-badge">PAPER</span>
+  <span class="badge badge-halted" id="halt-badge" style="display:none">⛔ HALTED</span>
+</div>
+
+<!-- ── Replay clock banner (visible during backtest) ──────────────────── -->
+<div id="replay-banner">
+  <span>BACKTEST</span>
+  <span class="replay-time" id="replay-time">—</span>
+  <span class="replay-progress" id="replay-progress"></span>
+</div>
+
+<!-- ── Live positions bar ──────────────────────────────────────────────── -->
+<div id="positions-bar" class="empty">
+  <div class="posbar-header">
+    <div class="posbar-label">Live Positions</div>
+    <div class="posbar-summary zero" id="posbar-total">—</div>
+    <button class="btn-liquidate" id="btn-liquidate" onclick="liquidateAll()" title="Close all open positions at market">LIQUIDATE ALL</button>
+  </div>
+  <div class="posbar-scroll">
+    <table class="posbar-table" id="posbar-table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Dir</th>
+          <th>Shares</th>
+          <th>Entry</th>
+          <th>Current</th>
+          <th>Notional</th>
+          <th>Stop</th>
+          <th>Target</th>
+          <th>P&L</th>
+        </tr>
+      </thead>
+      <tbody id="posbar-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="body-wrap">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+  <nav id="sidebar">
+
+    <!-- Mode selector -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Mode</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body" style="margin-top:8px">
+        <div class="mode-selector">
+          <button class="mode-btn active-live" id="mode-btn-live" onclick="setMode('live')">LIVE</button>
+          <button class="mode-btn" id="mode-btn-backtest" onclick="setMode('backtest')">BACKTEST</button>
+        </div>
+        <div class="backtest-controls" id="backtest-controls">
+          <div class="bt-row">
+            <span class="bt-lbl">Date</span>
+            <input class="bt-input" id="bt-date" type="date">
+          </div>
+          <div class="bt-row">
+            <span class="bt-lbl">Speed</span>
+            <select class="bt-select" id="bt-speed">
+              <option value="1">1x (Real-time)</option>
+              <option value="5">5x</option>
+              <option value="10" selected>10x</option>
+              <option value="50">50x</option>
+              <option value="100">100x</option>
+              <option value="0">MAX (No delay)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account balance -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Account</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body" id="acct-body" style="margin-top:8px">
+        <div class="acct-grid" id="acct-grid">
+          <div class="acct-item wide">
+            <span class="acct-lbl">Portfolio Value</span>
+            <span class="acct-val big" id="acct-equity">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Today's P&L</span>
+            <span class="acct-val" id="acct-day-pnl">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Today %</span>
+            <span class="acct-val" id="acct-day-pct">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Cash</span>
+            <span class="acct-val" id="acct-cash">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Buying Power</span>
+            <span class="acct-val" id="acct-bp">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Long Value</span>
+            <span class="acct-val" id="acct-long">—</span>
+          </div>
+          <div class="acct-item">
+            <span class="acct-lbl">Short Value</span>
+            <span class="acct-val" id="acct-short">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trade Rules -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Trade Rules</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body" style="margin-top:8px">
+        <div class="rules-grid" id="rules-grid">
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-max-pos">Max Position ($)</label>
+            <input class="rule-input" id="rule-max-pos" type="number" data-key="max_position_dollars" value="20000" step="1000">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-max-loss-trade">Max Loss/Trade (%)</label>
+            <input class="rule-input" id="rule-max-loss-trade" type="number" data-key="max_loss_per_trade_pct" value="2.0" step="0.5">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-max-daily-loss">Max Daily Loss (%)</label>
+            <input class="rule-input" id="rule-max-daily-loss" type="number" data-key="max_daily_loss_pct" value="3.0" step="0.5">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-trail-activate">Trail Activates At (%)</label>
+            <input class="rule-input" id="rule-trail-activate" type="number" data-key="trailing_stop_activation_pct" value="0.5" step="0.1">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-trail-pct">Trail Distance (%)</label>
+            <input class="rule-input" id="rule-trail-pct" type="number" data-key="trailing_stop_trail_pct" value="0.25" step="0.05">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl">Exit Mode</label>
+            <button id="rule-exit-mode" class="rule-input" style="cursor:pointer;text-align:center;font-family:var(--font);font-size:11px;font-weight:bold;letter-spacing:1px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;transition:all 0.2s"
+              onclick="toggleExitMode()">TRAILING STOP</button>
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-conviction">Conviction Threshold</label>
+            <input class="rule-input" id="rule-conviction" type="number" data-key="conviction_threshold" value="7.0" step="0.1" min="0" max="10">
+          </div>
+          <div class="rule-item">
+            <label class="rule-lbl" for="rule-time-exit">Time Exit (min)</label>
+            <input class="rule-input" id="rule-time-exit" type="number" data-key="time_exit_minutes" value="30" step="5">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Watchlist manager -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Watchlist</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body" style="margin-top:8px">
+        <div class="watchlist-add" style="display:flex;gap:4px;margin-bottom:8px">
+          <input id="wl-input" type="text" placeholder="AAPL, TSLA, ..."
+                 style="flex:1;background:var(--bg-card);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;font-family:var(--font)"
+                 onkeydown="if(event.key==='Enter')addToWatchlist()">
+          <button onclick="addToWatchlist()"
+                  style="background:var(--accent);color:#000;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:bold;cursor:pointer;font-family:var(--font)">ADD</button>
+        </div>
+        <div id="wl-tags" style="display:flex;flex-wrap:wrap;gap:4px;max-height:120px;overflow-y:auto"></div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:6px">Scanner picks up new tickers on next refresh cycle</div>
+      </div>
+    </div>
+
+    <!-- Agent config (collapsed by default) -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle collapsed" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Agent Models</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body collapsed" style="margin-top:8px">
+        <div class="agent-row" id="sidebar-agents"></div>
+      </div>
+    </div>
+
+    <!-- Open positions -->
+    <div class="sidebar-section">
+      <div class="sidebar-toggle" onclick="toggleSection(this)">
+        <div class="sidebar-label" style="margin-bottom:0">Open Positions</div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="sidebar-body" style="margin-top:8px">
+        <div id="positions-wrap">
+          <div class="no-pos">No open positions</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      PAPER TRADING — NOT FINANCIAL ADVICE
+    </div>
+  </nav>
+
+  <!-- ── Agent output panes ──────────────────────────────────────────────── -->
+  <div id="main">
+    <!-- Panes built by JS -->
+  </div>
+
+  <!-- ── Mentor chat panel (right side, collapsible) ───────────────────── -->
+  <div id="mentor-panel">
+    <div class="mentor-header">
+      <span class="mentor-title">AI MENTOR</span>
+      <span class="mentor-model-tag" id="mentor-model-tag">—</span>
+      <button class="btn-mentor-close" onclick="toggleMentorPanel()" title="Close mentor panel">&times;</button>
+    </div>
+    <div class="mentor-model-row">
+      <input class="mentor-model-input" id="mentor-model-input" type="text" placeholder="Paste OpenRouter model ID…">
+      <button class="btn-mentor-model-save" id="btn-mentor-model-save" onclick="saveMentorModel()">Set</button>
+    </div>
+    <div class="mentor-messages" id="mentor-messages">
+      <div class="mentor-empty" id="mentor-empty">
+        <div class="mentor-empty-icon">🧠</div>
+        <span>Ask me anything about your trades,<br>setups, or what the agents are doing.</span>
+      </div>
+    </div>
+    <div class="mentor-input-area">
+      <textarea class="mentor-input" id="mentor-input" placeholder="Ask the mentor…" rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMentorMessage();}"></textarea>
+      <button class="btn-mentor-send" id="btn-mentor-send" onclick="sendMentorMessage()">Send</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Agent metadata ────────────────────────────────────────────────────────
+const AGENTS = [
+  { id:"scanner",   title:"The Scanner",   tier:"T1", desc:"Market Data",       channel:"scalpbot:market-data",          cls:"market"   },
+  { id:"wire",      title:"The Wire",      tier:"T1", desc:"News & Sentiment",  channel:"scalpbot:catalysts",            cls:"catalyst" },
+  { id:"chartist",  title:"The Chartist",  tier:"T2", desc:"Technical Analysis",channel:"scalpbot:setups",               cls:"setup"    },
+  { id:"actuary",   title:"The Actuary",   tier:"T2", desc:"Risk Modeling",     channel:"scalpbot:risk-decisions",       cls:"risk"     },
+  { id:"general",   title:"The General",   tier:"T3", desc:"Trade Coordinator", channel:"scalpbot:directives",           cls:"directive"},
+  { id:"sniper",    title:"The Sniper",    tier:"T4", desc:"Order Execution",   channel:"scalpbot:fill-reports",         cls:"fill"     },
+  { id:"watcher",   title:"The Watcher",   tier:"T4", desc:"Position Monitor",  channel:"scalpbot:exit-orders",          cls:"exit"     },
+  { id:"historian", title:"The Historian", tier:"T5", desc:"Performance",       channel:"scalpbot:performance-updates",  cls:"perf"     },
+];
+
+const msgCounts = {};
+const _firstMsg  = {};   // agentId → timestamp of first message
+const _lastMsg   = {};   // agentId → timestamp of last message
+const _pipeline  = {};   // setup_id → { chartist: ms, actuary: ms, general: ms }
+const _priceCache = {};  // ticker → latest mid price (from market data)
+const _positionsCache = {};  // ticker → position dict (from status updates)
+AGENTS.forEach(a => { msgCounts[a.id] = 0; });
+
+// ── Build sidebar ─────────────────────────────────────────────────────────
+function buildSidebar() {
+  const row = document.getElementById("sidebar-agents");
+  for (const a of AGENTS) {
+    const item = document.createElement("div");
+    item.className = "agent-item";
+    item.innerHTML = `
+      <div class="agent-item-header">
+        <div class="status-dot stopped" id="sdot-${a.id}"></div>
+        <span class="agent-name-label">${a.title}</span>
+        <span class="agent-tier-label">${a.tier} · ${a.desc}</span>
+      </div>
+      <div class="model-row">
+        <input class="model-input" id="model-${a.id}" type="text" placeholder="openrouter model id…">
+        <button class="btn-save" id="bsave-${a.id}" onclick="saveModel('${a.id}')">Save</button>
+      </div>
+    `;
+    row.appendChild(item);
+  }
+}
+
+// ── Build agent panes (priority layout) ──────────────────────────────────
+// Compact strip: Scanner, Wire, Watcher, Historian (support agents)
+// Priority 2×2: Chartist, Actuary, General, Sniper (decision pipeline)
+const COMPACT_AGENTS  = ['scanner', 'wire', 'watcher', 'historian'];
+const PRIORITY_AGENTS = ['chartist', 'actuary', 'general', 'sniper'];
+
+function _buildPane(a, isCompact) {
+  const pane = document.createElement("div");
+  pane.className = "agent-pane" + (isCompact ? " compact" : "");
+  pane.id = `pane-${a.id}`;
+  pane.innerHTML = `
+    <div class="pane-header">
+      <div class="pane-dot stopped" id="pdot-${a.id}"></div>
+      <span class="pane-title">${a.title}</span>
+      <span class="pane-channel">${a.desc}</span>
+      <span class="pane-timer" id="uptm-${a.id}" title="Uptime since first message">--</span>
+      <span class="pane-last"  id="last-${a.id}" title="Last message">idle</span>
+      <span class="pane-count" id="cnt-${a.id}">0</span>
+    </div>
+    <div class="pane-log" id="log-${a.id}">
+      <div class="pane-empty">
+        <div class="pane-empty-icon">⌀</div>
+        <span>${isCompact ? 'Waiting…' : 'Waiting for activity…'}</span>
+      </div>
+    </div>
+  `;
+  return pane;
+}
+
+function buildPanes() {
+  const main = document.getElementById("main");
+
+  // Compact row (support agents)
+  const compactRow = document.createElement("div");
+  compactRow.className = "agent-row-compact";
+  for (const id of COMPACT_AGENTS) {
+    const a = AGENTS.find(x => x.id === id);
+    if (a) compactRow.appendChild(_buildPane(a, true));
+  }
+  main.appendChild(compactRow);
+
+  // Priority row (decision pipeline)
+  const priorityRow = document.createElement("div");
+  priorityRow.className = "agent-row-priority";
+  for (const id of PRIORITY_AGENTS) {
+    const a = AGENTS.find(x => x.id === id);
+    if (a) priorityRow.appendChild(_buildPane(a, false));
+  }
+  main.appendChild(priorityRow);
+}
+
+// ── Format a log entry from agent message data ────────────────────────────
+function formatLogEntry(agentId, channel, data) {
+  const parts = [];
+
+  if (channel === "scalpbot:market-data") {
+    // Special watchlist announcement packet
+    if (data.ticker === "__WATCHLIST__") {
+      const list   = (data._watchlist || []).join(", ");
+      const feed   = (data._feed   || "?").toUpperCase();
+      const source = (data._source || "?");
+      parts.push(`<span style="color:var(--cyan);font-weight:bold">📋 WATCHLIST [${source}/${feed}]</span><br><span style="color:var(--text)">${list}</span>`);
+    } else {
+      const ticker  = data.ticker || "?";
+      const last    = data.last   ? `$${parseFloat(data.last).toFixed(2)}` : "";
+      const spread  = data.spread ? `sprd:${data.spread}` : "";
+      const anomaly = data.tape_anomaly ? " 🔴 TAPE ANOMALY" : "";
+      const sweep   = data.sweep_detected ? " 🌊 SWEEP" : "";
+      parts.push(`<span class="log-ticker">${ticker}</span> ${last} ${spread}${anomaly}${sweep}`);
+    }
+  }
+
+  else if (channel === "scalpbot:catalysts") {
+    const ticker = data.ticker || "?";
+    const type   = data.catalyst_type || "";
+    const sent   = data.sentiment || "";
+    const score  = data.sentiment_score != null ? (parseFloat(data.sentiment_score)*100).toFixed(0)+"%" : "";
+    const hl     = data.headline ? `<br><span style="color:var(--muted)">${data.headline.substring(0,80)}…</span>` : "";
+    parts.push(`<span class="log-ticker">${ticker}</span> <span style="color:var(--accent2)">${type}</span> ${sent} ${score}${hl}`);
+  }
+  else if (channel === "scalpbot:setups") {
+    const ticker = data.ticker || "?";
+    const stype  = data.setup_type || "";
+    const sig    = data.signals || {};
+
+    // Warming up — show progress bar
+    if (stype === "warming_up") {
+      const got    = sig.bars_collected || 0;
+      const need   = sig.bars_needed    || 14;
+      const pct    = Math.min(100, Math.round((got / need) * 100));
+      const bar    = "█".repeat(Math.floor(pct / 10)) + "░".repeat(10 - Math.floor(pct / 10));
+      parts.push(`<span class="log-ticker">${ticker}</span> <span style="color:var(--muted)">warming ${bar} ${pct}% (${got}/${need} bars)</span>`);
+    }
+    // Live indicator snapshot
+    else if (stype === "indicator_snapshot") {
+      const rsi   = sig.rsi   != null ? `RSI:<span style="color:${sig.rsi < 35 ? 'var(--green)' : sig.rsi > 65 ? 'var(--accent)' : 'var(--accent2)'}">${sig.rsi}</span>` : "";
+      const e5    = sig.ema_5  != null ? `E5:${sig.ema_5}`  : "";
+      const e9    = sig.ema_9  != null ? `E9:${sig.ema_9}`  : "";
+      const e21   = sig.ema_21 != null ? `E21:${sig.ema_21}`: "";
+      const vwap  = sig.vwap   != null ? `VWAP:${sig.vwap}` : "";
+      const atr   = sig.atr    != null ? `ATR:${sig.atr}`   : "";
+      const close = sig.close  != null ? `$${sig.close}`    : "";
+      const bars  = sig.bars   != null ? `[${sig.bars}bars]`: "";
+      parts.push(`<span class="log-ticker">${ticker}</span> ${close} ${rsi} ${e5} ${e9} ${e21} <span style="color:var(--cyan)">${vwap}</span> ${atr} <span style="color:var(--muted)">${bars}</span>`);
+    }
+    // Real setup alert
+    else {
+      const dir    = data.direction  || "";
+      const qty    = data.quality_score != null ? `<span style="color:${data.quality_score >= 8 ? 'var(--green)' : 'var(--accent2)'}">Q:${data.quality_score}</span>` : "";
+      const entry  = data.entry_zone ? `$${parseFloat(data.entry_zone[0]).toFixed(2)}-${parseFloat(data.entry_zone[1]).toFixed(2)}` : "";
+      parts.push(`<span class="log-ticker">${ticker}</span> <span style="color:var(--purple);font-weight:bold">${stype}</span> ${dir.toUpperCase()} ${qty} ${entry}`);
+    }
+  }
+
+  else if (channel === "scalpbot:risk-decisions") {
+    const dec    = data.decision || "?";
+    const ticker = data.ticker   || "";
+    const reason = data.reason   || "";
+    const decCls = dec === "approved" ? "log-action enter" : "log-action vetoed";
+
+    if (dec === "approved") {
+      const shares = data.approved_shares ? `${data.approved_shares}sh` : "";
+      const maxloss= data.max_loss_dollars ? `-$${data.max_loss_dollars}` : "";
+      const entry  = data.entry_price ? `@$${parseFloat(data.entry_price).toFixed(2)}` : "";
+      const stop   = data.stop_price  ? `stop:$${parseFloat(data.stop_price).toFixed(2)}` : "";
+      const target = data.target_price? `tgt:$${parseFloat(data.target_price).toFixed(2)}` : "";
+      const rr     = data.rr_ratio    ? `R/R:${data.rr_ratio}` : "";
+      const heat   = data.portfolio_heat_pct != null ? `heat:${data.portfolio_heat_pct}%` : "";
+      const dir    = data.direction   || "";
+      const stype  = data.setup_type  ? `<span style="color:var(--purple)">${data.setup_type}</span>` : "";
+      parts.push(`<span class="${decCls}">APPROVED</span> <span class="log-ticker">${ticker}</span> ${stype} ${shares} ${maxloss}`);
+      parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${dir.toUpperCase()} ${entry} ${stop} ${target} ${rr} ${heat}</span>`);
+    } else {
+      const stype  = data.setup_type && data.setup_type !== 'unknown' ? `<span style="color:var(--purple);font-size:9px">${data.setup_type}</span> ` : "";
+      parts.push(`<span class="${decCls}">VETOED</span> <span class="log-ticker">${ticker}</span> ${stype}<span style="color:var(--accent);font-size:9px">${reason.replace(/_/g,' ')}</span>`);
+      // Show extra context for vetoes
+      const extras = [];
+      if (data.quality_score != null) extras.push(`Q:${data.quality_score}`);
+      if (data.rr_ratio != null) extras.push(`R/R:${data.rr_ratio}`);
+      if (data.position_heat_pct != null) extras.push(`heat:${data.position_heat_pct}%`);
+      if (data.current_heat_pct != null) extras.push(`portf:${data.current_heat_pct}%`);
+      if (extras.length) parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${extras.join(' · ')}</span>`);
+    }
+  }
+  else if (channel === "scalpbot:directives") {
+    const action = data.action  || "?";
+    const ticker = data.ticker  || "";
+    const conv   = data.conviction_score != null ? `conv:${parseFloat(data.conviction_score).toFixed(1)}` : "";
+    const entry  = data.entry_price ? `@$${parseFloat(data.entry_price).toFixed(2)}` : "";
+    const shares = data.approved_shares ? `${data.approved_shares}sh` : "";
+    const dir    = data.direction || "";
+    const stop   = data.stop_price  ? `stop:$${parseFloat(data.stop_price).toFixed(2)}` : "";
+    const target = data.target_price? `tgt:$${parseFloat(data.target_price).toFixed(2)}` : "";
+    const thresh = data.threshold != null ? `thr:${parseFloat(data.threshold).toFixed(1)}` : "";
+    const stype  = data.setup_type && data.setup_type !== 'unknown' ? `<span style="color:var(--purple)">${data.setup_type}</span>` : "";
+    const color  = action === "enter" ? "var(--green)" : action === "pass" ? "var(--gray)" : "var(--accent2)";
+    const rationale = data.rationale ? `<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${data.rationale.substring(0,120)}</span>` : "";
+    parts.push(`<span style="color:${color};font-weight:bold">${action.toUpperCase()}</span> <span class="log-ticker">${ticker}</span> ${stype} ${entry} ${shares} ${conv}`);
+    if (action === "enter") {
+      const details = [dir.toUpperCase(), stop, target, thresh].filter(Boolean);
+      if (details.length) parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${details.join(' · ')}</span>`);
+    }
+    parts.push(rationale);
+  }
+  else if (channel === "scalpbot:fill-reports") {
+    const ticker = data.ticker || "?";
+    const status = data.status || "?";
+    const shares = data.filled_shares != null ? `${data.filled_shares}sh` : (data.filled_qty ? `${data.filled_qty}sh` : "");
+    const price  = data.avg_fill_price ? `@$${parseFloat(data.avg_fill_price).toFixed(2)}` : (data.fill_price ? `@$${parseFloat(data.fill_price).toFixed(2)}` : "");
+    const slip   = data.slippage_cents != null ? `slip:${data.slippage_cents}¢` : "";
+    const dir    = data.direction || data.side || "";
+    const stop   = data.stop_price ? `stop:$${parseFloat(data.stop_price).toFixed(2)}` : "";
+    const scolor = status === "filled" || status === "partially_filled" ? "var(--green)" : "var(--accent)";
+    const dirTag = dir ? `<span style="color:${dir.includes('short') ? 'var(--accent)' : 'var(--green)'};font-size:9px">${dir.toUpperCase()}</span> ` : "";
+    const stypeF = data.setup_type && data.setup_type !== 'unknown' ? `<span style="color:var(--purple);font-size:9px">${data.setup_type}</span> ` : "";
+    const reason = data.reason ? `<br><span style="color:var(--accent);font-size:9px">${data.reason.substring(0,120)}</span>` : "";
+    parts.push(`<span class="log-ticker">${ticker}</span> <span style="color:${scolor};font-weight:bold">${status.toUpperCase()}</span> ${dirTag}${stypeF}${shares} ${price} ${slip}`);
+    if (stop) parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${stop}</span>`);
+    if (reason) parts.push(reason);
+  }
+  else if (channel === "scalpbot:exit-orders") {
+    const ticker  = data.ticker    || "?";
+    const reason  = data.exit_type || "?";
+    const shares  = data.shares    != null ? `${data.shares}sh` : "";
+    const entry   = data.entry_price ? `entry:$${parseFloat(data.entry_price).toFixed(2)}` : "";
+    const exitPx  = data.exit_price  ? `exit:$${parseFloat(data.exit_price).toFixed(2)}` : "";
+    const dir     = data.direction   || "";
+    const pnl     = data.pnl != null ? `P&L:${parseFloat(data.pnl) >= 0 ? '+' : ''}$${parseFloat(data.pnl).toFixed(2)}` : "";
+    const rsn     = data.reason      || "";
+    const pnlColor = data.pnl != null ? (parseFloat(data.pnl) >= 0 ? 'var(--green)' : 'var(--accent)') : 'var(--muted)';
+    const stypeX = data.setup_type && data.setup_type !== 'unknown' ? `<span style="color:var(--purple);font-size:9px">${data.setup_type}</span> ` : "";
+    parts.push(`<span class="log-ticker">${ticker}</span> EXIT <span style="color:#ff6b35">${reason}</span> ${stypeX}${shares}`);
+    const details = [dir.toUpperCase(), entry, exitPx, pnl].filter(Boolean);
+    if (details.length) parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${details.join(' · ')}</span>`);
+    if (pnl) parts.push(`<br><span style="color:${pnlColor};font-weight:bold;font-size:10px;margin-left:8px">${pnl}</span>`);
+    if (rsn) parts.push(`<br><span style="color:var(--muted);font-size:9px;margin-left:8px">${rsn.substring(0,100)}</span>`);
+  }
+  else if (channel === "scalpbot:performance-updates") {
+    const stype = data.setup_type || "?";
+    const wr    = data.win_rate   != null ? `WR:${(data.win_rate*100).toFixed(0)}%` : "";
+    const exp   = data.expectancy_cents != null ? `EV:${data.expectancy_cents}¢` : "";
+    const n     = data.sample_size != null ? `n=${data.sample_size}` : "";
+    const deg   = data.degradation_flag ? " ⚠️ DEGRADED" : "";
+    parts.push(`<span style="color:var(--muted)">${stype}</span> ${wr} ${exp} ${n}${deg}`);
+  }
+  else if (channel === "scalpbot:risk:daily-halt") {
+    const pnl  = data.daily_pnl  != null ? `P&L:$${data.daily_pnl}` : "";
+    const pct  = data.loss_pct   != null ? `(${data.loss_pct}%)` : "";
+    parts.push(`⛔ DAILY HALT TRIGGERED ${pnl} ${pct}`);
+  }
+  else {
+    parts.push(JSON.stringify(data).substring(0, 120));
+  }
+
+  return parts.join(" ");
+}
+
+// ── Append a log line to an agent pane ────────────────────────────────────
+function appendLog(agentId, channel, data, tsMs, cls) {
+  const logEl = document.getElementById(`log-${agentId}`);
+  if (!logEl) return;
+
+  // Remove "waiting" placeholder on first message
+  const empty = logEl.querySelector(".pane-empty");
+  if (empty) empty.remove();
+
+  const ts = new Date(tsMs);
+  const hms = ts.toLocaleTimeString("en-US", { hour12: false, hour:"2-digit", minute:"2-digit", second:"2-digit" });
+
+  const entry = document.createElement("div");
+  entry.className = `log-entry ${cls}`;
+  entry.innerHTML = `<span class="log-ts">${hms}</span><span class="log-body">${formatLogEntry(agentId, channel, data)}</span>`;
+  logEl.appendChild(entry);
+
+  // Keep max 200 lines per pane
+  while (logEl.children.length > 200) logEl.removeChild(logEl.firstChild);
+
+  // Auto-scroll if near bottom
+  const thresh = 80;
+  if (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < thresh) {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Flash the pane border
+  const pane = document.getElementById(`pane-${agentId}`);
+  pane.classList.add("active");
+  clearTimeout(pane._flashTimer);
+  pane._flashTimer = setTimeout(() => pane.classList.remove("active"), 600);
+
+  // Update count
+  msgCounts[agentId]++;
+  const cntEl = document.getElementById(`cnt-${agentId}`);
+  if (cntEl) cntEl.textContent = msgCounts[agentId];
+
+  // Track first & last message times for timers
+  const now = Date.now();
+  if (!_firstMsg[agentId]) _firstMsg[agentId] = now;
+  _lastMsg[agentId] = now;
+}
+
+// ── Pipeline handoff timing ────────────────────────────────────────────────
+function trackPipeline(agentId, data) {
+  const sid = data.setup_id;
+  if (!sid) return;
+  const now = Date.now();
+  if (!_pipeline[sid]) _pipeline[sid] = {};
+  _pipeline[sid][agentId] = now;
+  // Show handoff times inline
+  if (agentId === 'actuary' && _pipeline[sid]['chartist']) {
+    const ms = now - _pipeline[sid]['chartist'];
+    _injectHandoff('log-actuary', sid, `chartist→actuary: ${ms}ms`);
+  }
+  if (agentId === 'general' && _pipeline[sid]['actuary']) {
+    const ms = now - _pipeline[sid]['actuary'];
+    const total = _pipeline[sid]['chartist'] ? now - _pipeline[sid]['chartist'] : ms;
+    _injectHandoff('log-general', sid, `actuary→general: ${ms}ms  |  total pipeline: ${total}ms`);
+  }
+  // Cleanup old entries
+  const keys = Object.keys(_pipeline);
+  if (keys.length > 100) delete _pipeline[keys[0]];
+}
+
+function _injectHandoff(logId, sid, text) {
+  const logEl = document.getElementById(logId);
+  if (!logEl) return;
+  const el = document.createElement('div');
+  el.className = 'log-entry pipeline-timing';
+  el.innerHTML = `<span class="log-ts">⏱</span><span class="log-body" style="color:var(--cyan);font-size:9px">${text}</span>`;
+  logEl.appendChild(el);
+  if (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Uptime ticker (runs every second) ─────────────────────────────────────
+function _fmtDur(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m%60}m`;
+  if (m > 0) return `${m}m ${s%60}s`;
+  return `${s}s`;
+}
+function _fmtAgo(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  return `${Math.floor(s/60)}m ago`;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const a of AGENTS) {
+    const uptmEl = document.getElementById(`uptm-${a.id}`);
+    const lastEl = document.getElementById(`last-${a.id}`);
+    if (_firstMsg[a.id] && uptmEl) uptmEl.textContent = '▶ ' + _fmtDur(now - _firstMsg[a.id]);
+    if (_lastMsg[a.id]  && lastEl) lastEl.textContent  = _fmtAgo(now - _lastMsg[a.id]);
+  }
+}, 1000);
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────
+const socket = io();
+const connDot = document.getElementById("conn-dot");
+
+socket.on("connect",    () => connDot.className = "ok");
+socket.on("disconnect", () => connDot.className = "");
+
+socket.on("status_update", data => applyStatus(data));
+socket.on("models_update",  data => applyModels(data));
+
+socket.on("agent_log", msg => {
+  const { agent, channel, data, ts } = msg;
+  const meta = AGENTS.find(a => a.id === agent);
+  if (!meta) return;
+  appendLog(agent, channel, data, ts, meta.cls);
+  trackPipeline(agent, data);   // pipeline handoff timing
+
+  // Cache latest price from market data for positions bar
+  if (channel === "scalpbot:market-data" && data.ticker && data.ticker !== "__WATCHLIST__") {
+    const bid = parseFloat(data.bid || 0);
+    const ask = parseFloat(data.ask || 0);
+    const last = parseFloat(data.last || 0);
+    if (bid > 0 && ask > 0) _priceCache[data.ticker] = (bid + ask) / 2;
+    else if (last > 0) _priceCache[data.ticker] = last;
+    // Re-render positions bar if this ticker is in a position
+    if (_positionsCache[data.ticker]) renderPositionsBar();
+  }
+
+  // Update dot on pane
+  const pdot = document.getElementById(`pdot-${agent}`);
+  if (pdot) { pdot.className = "pane-dot running"; clearTimeout(pdot._t); pdot._t = setTimeout(() => pdot.className = "pane-dot", 5000); }
+  // Update pane running class
+  const pane = document.getElementById(`pane-${agent}`);
+  if (pane) pane.classList.add("running");
+});
+
+// ── Apply status update ────────────────────────────────────────────────────
+let _alpacaPnlActive = false;  // true once Alpaca account data loads
+
+function applyStatus(data) {
+  // P&L — only use Redis if Alpaca hasn't loaded yet
+  if (!_alpacaPnlActive) {
+    const pnl = data.daily_pnl || 0;
+    const pnlEl = document.getElementById("daily-pnl");
+    pnlEl.textContent = (pnl >= 0 ? "+" : "") + "$" + Math.abs(pnl).toFixed(2);
+    pnlEl.className = "topbar-pnl " + (pnl > 0 ? "pos" : pnl < 0 ? "neg" : "zero");
+  }
+
+  // Halt
+  const haltBadge = document.getElementById("halt-badge");
+  haltBadge.style.display = data.halted ? "" : "none";
+
+  // Agent dots in sidebar
+  const now = Date.now();
+  for (const [name, info] of Object.entries(data.agents || {})) {
+    const sdot = document.getElementById(`sdot-${name}`);
+    if (!sdot) continue;
+    const age_s = (now - (info.ts || 0)) / 1000;
+    let cls = "stopped";
+    if (info.status === "running" && age_s < 10) cls = "running";
+    else if (info.status === "running" && age_s >= 15) cls = "error";
+    sdot.className = `status-dot ${cls}`;
+  }
+
+  // Positions
+  applyPositions(data.positions || {});
+}
+
+function applyPositions(positions) {
+  // Update cache
+  Object.keys(_positionsCache).forEach(k => delete _positionsCache[k]);
+  for (const [ticker, pos] of Object.entries(positions)) {
+    _positionsCache[ticker] = pos;
+  }
+
+  // Sidebar (compact)
+  const wrap = document.getElementById("positions-wrap");
+  const entries = Object.values(positions);
+  if (entries.length === 0) {
+    wrap.innerHTML = '<div class="no-pos">No open positions</div>';
+  } else {
+    const rows = entries.map(p => {
+      const dir = p.direction || "long";
+      return `<tr>
+        <td class="${dir==='long'?'tag-long':'tag-short'}">${(p.ticker||"?")}</td>
+        <td>$${parseFloat(p.entry_price||0).toFixed(2)}</td>
+        <td>${p.shares||0}</td>
+      </tr>`;
+    }).join("");
+    wrap.innerHTML = `<table class="pos-table">
+      <thead><tr><th>Ticker</th><th>Entry</th><th>Shares</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  // Top positions bar
+  renderPositionsBar();
+}
+
+function renderPositionsBar() {
+  const bar = document.getElementById("positions-bar");
+  const tbody = document.getElementById("posbar-tbody");
+  const totalEl = document.getElementById("posbar-total");
+  const entries = Object.values(_positionsCache);
+
+  if (entries.length === 0) {
+    bar.className = "empty";
+    tbody.innerHTML = "";
+    totalEl.textContent = "—";
+    totalEl.className = "posbar-summary zero";
+    return;
+  }
+
+  bar.className = "has-positions";
+  let totalPnl = 0;
+  let totalNotional = 0;
+
+  tbody.innerHTML = entries.map(p => {
+    const ticker = p.ticker || "?";
+    const dir = p.direction || "long";
+    const entry = parseFloat(p.entry_price || 0);
+    const shares = parseInt(p.shares || 0);
+    const stop = parseFloat(p.stop_price || 0);
+    const target = parseFloat(p.target_price || 0);
+    const current = _priceCache[ticker] || parseFloat(p.current_price || 0) || entry;
+    const notional = current * Math.abs(shares);
+    totalNotional += notional;
+
+    let pnl;
+    if (p.unrealized_pnl != null) {
+      pnl = parseFloat(p.unrealized_pnl);
+    } else if (dir === "short") {
+      pnl = (entry - current) * Math.abs(shares);
+    } else {
+      pnl = (current - entry) * shares;
+    }
+    totalPnl += pnl;
+
+    const pnlPct = p.unrealized_pnl_pct != null
+      ? parseFloat(p.unrealized_pnl_pct).toFixed(2)
+      : (entry > 0 ? ((current - entry) / entry * 100 * (dir === "short" ? -1 : 1)).toFixed(2) : "0.00");
+    const pnlClass = pnl >= 0 ? "pos" : "neg";
+    const curColor = current > entry
+      ? (dir === 'long' ? 'var(--green)' : 'var(--accent)')
+      : current < entry
+        ? (dir === 'long' ? 'var(--accent)' : 'var(--green)')
+        : 'var(--text)';
+
+    return `<tr>
+      <td>${ticker}</td>
+      <td><span class="dir-tag ${dir}">${dir.toUpperCase()}</span></td>
+      <td>${Math.abs(shares)}</td>
+      <td>$${entry.toFixed(2)}</td>
+      <td style="color:${curColor}">$${current.toFixed(2)}</td>
+      <td>$${notional.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
+      <td style="color:var(--accent)">${stop > 0 ? '$' + stop.toFixed(2) : '—'}</td>
+      <td style="color:var(--green)">${target > 0 ? '$' + target.toFixed(2) : '—'}</td>
+      <td class="posbar-pnl-cell ${pnlClass}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} (${pnlPct}%)</td>
+    </tr>`;
+  }).join("");
+
+  // Update total summary
+  const totalClass = totalPnl > 0 ? "pos" : totalPnl < 0 ? "neg" : "zero";
+  totalEl.className = "posbar-summary " + totalClass;
+  totalEl.textContent = `${entries.length} pos · ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} · $${totalNotional.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})} notional`;
+}
+
+// ── Model save/load ────────────────────────────────────────────────────────
+function applyModels(data) {
+  for (const [name, model] of Object.entries(data)) {
+    const inp = document.getElementById(`model-${name}`);
+    if (inp && model) inp.value = model;
+  }
+}
+
+async function loadModels() {
+  try {
+    const res = await fetch("/api/models");
+    applyModels(await res.json());
+  } catch(e) {}
+}
+
+async function saveModel(agentId) {
+  const inp = document.getElementById(`model-${agentId}`);
+  const btn = document.getElementById(`bsave-${agentId}`);
+  const model = inp.value.trim();
+  if (!model) return;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const res = await fetch("/api/models", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ agent: agentId, model })
+    });
+    if (res.ok) {
+      btn.className = "btn-save saved"; btn.textContent = "✓";
+      setTimeout(() => { btn.className = "btn-save"; btn.textContent = "Save"; btn.disabled = false; }, 1800);
+    } else { throw new Error(); }
+  } catch(e) {
+    btn.textContent = "ERR"; btn.style.borderColor = "var(--accent)";
+    setTimeout(() => { btn.className = "btn-save"; btn.textContent = "Save"; btn.disabled = false; }, 2000);
+  }
+}
+
+// ── Auto-save model on paste/input (debounced 500ms) ─────────────────────
+const _modelDebounce = {};
+function _attachModelAutoSave() {
+  document.querySelectorAll('.model-input').forEach(inp => {
+    const agentId = inp.id.replace('model-', '');
+    inp.addEventListener('input', () => {
+      clearTimeout(_modelDebounce[agentId]);
+      _modelDebounce[agentId] = setTimeout(() => saveModel(agentId), 500);
+    });
+  });
+}
+
+// ── Launch / Stop ──────────────────────────────────────────────────────────
+let _agentsRunning = false;
+
+async function toggleAgents() {
+  const btn = document.getElementById("btn-launch");
+  btn.disabled = true; btn.textContent = "…";
+  const endpoint = _agentsRunning ? "/api/agents/stop" : "/api/agents/start";
+  try {
+    const res  = await fetch(endpoint, { method: "POST" });
+    const data = await res.json();
+    if (data.ok) { _agentsRunning = !_agentsRunning; syncLaunchBtn(); }
+    else alert("Error: " + data.message);
+  } catch(e) { alert("Server unreachable: " + e); }
+  finally { btn.disabled = false; }
+}
+
+function syncLaunchBtn() {
+  const btn = document.getElementById("btn-launch");
+  btn.textContent = _agentsRunning ? "⏹ Stop Agents" : "⚡ Launch Agents";
+  btn.className   = "btn-launch " + (_agentsRunning ? "stop" : "start");
+}
+
+async function checkAgentProc() {
+  try {
+    const data = await (await fetch("/api/agents/status")).json();
+    if (data.running !== _agentsRunning) { _agentsRunning = data.running; syncLaunchBtn(); }
+  } catch(e) {}
+}
+setInterval(checkAgentProc, 3000);
+checkAgentProc();
+
+async function emergencyStop() {
+  const btn = document.getElementById("btn-estop");
+  btn.disabled = true;
+  btn.textContent = "🛑 STOPPING…";
+  try {
+    await fetch("/api/agents/stop", { method: "POST" });
+    _agentsRunning = false;
+    syncLaunchBtn();
+    btn.textContent = "✓ STOPPED";
+    setTimeout(() => { btn.disabled = false; btn.textContent = "🛑 E-STOP"; }, 2500);
+  } catch(e) {
+    // Server may have shut down — that's expected
+    btn.textContent = "✓ STOPPED";
+  }
+}
+
+
+// ── Liquidate all positions ──────────────────────────────────────────────
+let _liquidateArmed = false;
+let _liquidateTimer = null;
+
+async function liquidateAll() {
+  const btn = document.getElementById('btn-liquidate');
+
+  // First click → arm (confirm step)
+  if (!_liquidateArmed) {
+    _liquidateArmed = true;
+    btn.classList.add('confirm');
+    btn.textContent = 'CONFIRM LIQUIDATE';
+    // Auto-disarm after 4 seconds
+    _liquidateTimer = setTimeout(() => {
+      _liquidateArmed = false;
+      btn.classList.remove('confirm');
+      btn.textContent = 'LIQUIDATE ALL';
+    }, 4000);
+    return;
+  }
+
+  // Second click → execute
+  clearTimeout(_liquidateTimer);
+  _liquidateArmed = false;
+  btn.disabled = true;
+  btn.classList.remove('confirm');
+  btn.textContent = 'LIQUIDATING…';
+
+  try {
+    const res = await fetch('/api/liquidate-all', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = `CLOSED ${data.count} POS`;
+      btn.style.borderColor = 'var(--green)';
+      btn.style.color = 'var(--green)';
+      // Refresh positions
+      setTimeout(() => loadAccount(), 1000);
+    } else {
+      btn.textContent = 'ERROR';
+      console.error('Liquidate error:', data.error);
+    }
+  } catch(e) {
+    btn.textContent = 'FAILED';
+    console.error('Liquidate failed:', e);
+  }
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = 'LIQUIDATE ALL';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }, 3000);
+}
+
+// ── Collapsible sidebar sections ─────────────────────────────────────────
+function toggleSection(toggleEl) {
+  toggleEl.classList.toggle('collapsed');
+  const body = toggleEl.nextElementSibling;
+  body.classList.toggle('collapsed');
+}
+
+// ── Account data ─────────────────────────────────────────────────────────
+function _$(id) { return document.getElementById(id); }
+function _fmtMoney(n) { return '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+// ── Watchlist management ───────────────────────────────────────────────────
+async function loadWatchlist() {
+  try {
+    const res = await fetch('/api/watchlist');
+    if (!res.ok) return;
+    const d = await res.json();
+    renderWatchlistTags(d.fallback || [], d.user_added || []);
+  } catch(e) { console.warn('loadWatchlist failed', e); }
+}
+
+function renderWatchlistTags(fallback, userAdded) {
+  const container = _$('wl-tags');
+  if (!container) return;
+  container.innerHTML = '';
+  // Show fallback tickers (not removable)
+  fallback.forEach(t => {
+    const tag = document.createElement('span');
+    tag.className = 'wl-tag wl-tag-fallback';
+    tag.textContent = t;
+    tag.title = 'From config (fallback list)';
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:2px;background:var(--bg-card);color:var(--text-dim);border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;font-family:var(--font)';
+    container.appendChild(tag);
+  });
+  // Show user-added tickers (removable with X)
+  userAdded.forEach(t => {
+    const tag = document.createElement('span');
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:2px;background:var(--accent);color:#000;border:none;border-radius:3px;padding:2px 6px;font-size:10px;font-weight:bold;font-family:var(--font)';
+    tag.innerHTML = t + ' <span style="cursor:pointer;margin-left:2px;font-weight:normal" onclick="removeFromWatchlist(\'' + t + '\')">&times;</span>';
+    tag.title = 'User-added (click X to remove)';
+    container.appendChild(tag);
+  });
+}
+
+async function addToWatchlist() {
+  const input = _$('wl-input');
+  const val = input.value.trim();
+  if (!val) return;
+  try {
+    const res = await fetch('/api/watchlist', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tickers: val })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      input.value = '';
+      loadWatchlist();
+    }
+  } catch(e) { console.warn('addToWatchlist failed', e); }
+}
+
+async function removeFromWatchlist(ticker) {
+  try {
+    const res = await fetch('/api/watchlist', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ticker })
+    });
+    const d = await res.json();
+    if (d.ok) loadWatchlist();
+  } catch(e) { console.warn('removeFromWatchlist failed', e); }
+}
+
+async function loadAccount() {
+  try {
+    const res = await fetch('/api/account');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.error) return;
+
+    _$('acct-equity').textContent = _fmtMoney(d.equity);
+
+    const dayPnl = d.day_pnl || 0;
+    const dayPct = d.day_pnl_pct || 0;
+    _$('acct-day-pnl').textContent = (dayPnl >= 0 ? '+' : '-') + _fmtMoney(dayPnl);
+    _$('acct-day-pnl').className = 'acct-val ' + (dayPnl >= 0 ? 'pos' : 'neg');
+    _$('acct-day-pct').textContent = (dayPct >= 0 ? '+' : '') + dayPct.toFixed(2) + '%';
+    _$('acct-day-pct').className = 'acct-val ' + (dayPct >= 0 ? 'pos' : 'neg');
+
+    _$('acct-cash').textContent = _fmtMoney(d.cash);
+    _$('acct-bp').textContent = _fmtMoney(d.buying_power);
+    _$('acct-long').textContent = _fmtMoney(d.long_market_value);
+    _$('acct-short').textContent = _fmtMoney(d.short_market_value);
+
+    // Update top bar P&L from Alpaca (only in live mode — backtest uses Redis P&L)
+    if (_currentMode !== 'backtest') {
+      _alpacaPnlActive = true;
+      const pnlEl = document.getElementById('daily-pnl');
+      pnlEl.textContent = (dayPnl >= 0 ? '+' : '-') + _fmtMoney(dayPnl);
+      pnlEl.className = 'topbar-pnl ' + (dayPnl > 0 ? 'pos' : dayPnl < 0 ? 'neg' : 'zero');
+    }
+  } catch(e) {}
+}
+// Refresh account every 5 seconds
+loadAccount();
+setInterval(loadAccount, 5000);
+
+// Load watchlist on init
+loadWatchlist();
+
+// ── Trade Rules ──────────────────────────────────────────────────────────
+async function loadTradeRules() {
+  try {
+    const res = await fetch('/api/trade-rules');
+    if (!res.ok) return;
+    const rules = await res.json();
+    document.querySelectorAll('.rule-input').forEach(inp => {
+      const key = inp.dataset.key;
+      if (key && rules[key] != null) inp.value = rules[key];
+    });
+    // Sync exit mode button
+    _updateExitModeBtn(String(rules.use_target_exit).toLowerCase() === 'true');
+  } catch(e) {}
+}
+
+function _updateExitModeBtn(useTarget) {
+  const btn = document.getElementById('rule-exit-mode');
+  if (!btn) return;
+  btn._useTarget = useTarget;
+  if (useTarget) {
+    btn.textContent = 'PRICE TARGET';
+    btn.style.background = 'rgba(168,85,247,0.25)';
+    btn.style.color = '#a855f7';
+    btn.style.borderColor = '#a855f7';
+  } else {
+    btn.textContent = 'TRAILING STOP';
+    btn.style.background = 'rgba(0,212,255,0.15)';
+    btn.style.color = '#00d4ff';
+    btn.style.borderColor = '#00d4ff';
+  }
+}
+
+async function toggleExitMode() {
+  const btn = document.getElementById('rule-exit-mode');
+  const newVal = !btn._useTarget;
+  _updateExitModeBtn(newVal);
+  try {
+    await fetch('/api/trade-rules', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ use_target_exit: newVal })
+    });
+    btn.classList.add('saved');
+    setTimeout(() => btn.classList.remove('saved'), 1500);
+  } catch(e) {}
+}
+
+const _ruleDebounce = {};
+function _attachRuleAutoSave() {
+  document.querySelectorAll('.rule-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const key = inp.dataset.key;
+      clearTimeout(_ruleDebounce[key]);
+      _ruleDebounce[key] = setTimeout(async () => {
+        const val = inp.type === 'number' ? parseFloat(inp.value) : inp.value;
+        try {
+          const res = await fetch('/api/trade-rules', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ [key]: val })
+          });
+          if (res.ok) {
+            inp.classList.add('saved');
+            setTimeout(() => inp.classList.remove('saved'), 1500);
+          }
+        } catch(e) {}
+      }, 600);
+    });
+  });
+}
+
+// ── Mode selector (Live / Backtest) ──────────────────────────────────────
+let _currentMode = 'live';
+
+async function loadMode() {
+  try {
+    const res = await fetch('/api/mode');
+    if (!res.ok) return;
+    const d = await res.json();
+    _currentMode = d.mode || 'live';
+    _syncModeUI();
+    if (d.mode === 'backtest' && d.date) {
+      document.getElementById('bt-date').value = d.date;
+    }
+    if (d.mode === 'backtest' && d.speed != null) {
+      document.getElementById('bt-speed').value = String(d.speed);
+    }
+  } catch(e) {}
+
+  // Set default date to last weekday if not already set
+  const btDateEl = document.getElementById('bt-date');
+  if (!btDateEl.value) {
+    const d2 = new Date();
+    d2.setDate(d2.getDate() - 1);
+    while (d2.getDay() === 0 || d2.getDay() === 6) d2.setDate(d2.getDate() - 1);
+    btDateEl.value = d2.toISOString().slice(0, 10);
+  }
+}
+
+function _syncModeUI() {
+  const liveBtn = document.getElementById('mode-btn-live');
+  const btBtn = document.getElementById('mode-btn-backtest');
+  const btControls = document.getElementById('backtest-controls');
+  const modeBadge = document.getElementById('mode-badge');
+
+  if (_currentMode === 'backtest') {
+    liveBtn.className = 'mode-btn';
+    btBtn.className = 'mode-btn active-backtest';
+    btControls.classList.add('visible');
+    modeBadge.textContent = 'BACKTEST';
+    modeBadge.style.borderColor = 'var(--cyan)';
+    modeBadge.style.color = 'var(--cyan)';
+  } else {
+    liveBtn.className = 'mode-btn active-live';
+    btBtn.className = 'mode-btn';
+    btControls.classList.remove('visible');
+    modeBadge.textContent = 'PAPER';
+    modeBadge.style.borderColor = '';
+    modeBadge.style.color = '';
+  }
+}
+
+async function setMode(mode) {
+  if (_agentsRunning) {
+    alert('Stop agents before switching modes.');
+    return;
+  }
+  _currentMode = mode;
+  _syncModeUI();
+
+  // Also hide/show replay banner
+  document.getElementById('replay-banner').classList.remove('active');
+
+  const body = { mode };
+  if (mode === 'backtest') {
+    body.date = document.getElementById('bt-date').value;
+    body.speed = parseFloat(document.getElementById('bt-speed').value);
+  }
+
+  try {
+    await fetch('/api/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+  } catch(e) {}
+}
+
+// Override toggleAgents to set mode before starting
+const _originalToggleAgents = toggleAgents;
+toggleAgents = async function() {
+  // Before starting, make sure mode is synced
+  if (!_agentsRunning && _currentMode === 'backtest') {
+    const btDate = document.getElementById('bt-date').value;
+    if (!btDate) {
+      alert('Please select a date for the backtest.');
+      return;
+    }
+    await setMode('backtest');
+  }
+  await _originalToggleAgents();
+};
+
+// ── Replay banner updates (from status_update) ──────────────────────────
+function _updateReplayBanner(data) {
+  const banner = document.getElementById('replay-banner');
+  if (data.mode === 'backtest' && data.sim_clock_ms) {
+    banner.classList.add('active');
+    const simDate = new Date(data.sim_clock_ms);
+    const timeStr = simDate.toLocaleString('en-US', {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+    document.getElementById('replay-time').textContent = timeStr;
+  } else {
+    banner.classList.remove('active');
+  }
+}
+
+// Hook into applyStatus to also update replay banner
+const _origApplyStatus = applyStatus;
+applyStatus = function(data) {
+  _origApplyStatus(data);
+  _updateReplayBanner(data);
+};
+
+// ── Mentor Chat ──────────────────────────────────────────────────────────
+let _mentorOpen = false;
+
+function toggleMentorPanel() {
+  _mentorOpen = !_mentorOpen;
+  const panel = document.getElementById('mentor-panel');
+  const btn = document.getElementById('btn-mentor-toggle');
+  panel.classList.toggle('open', _mentorOpen);
+  btn.classList.toggle('active', _mentorOpen);
+  if (_mentorOpen) {
+    document.getElementById('mentor-input').focus();
+    // Scroll messages to bottom
+    const msgs = document.getElementById('mentor-messages');
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+async function loadMentorModel() {
+  try {
+    const res = await fetch('/api/mentor/model');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.model) {
+      document.getElementById('mentor-model-input').value = d.model;
+      document.getElementById('mentor-model-tag').textContent = d.model.split('/').pop();
+    }
+  } catch(e) {}
+}
+
+async function saveMentorModel() {
+  const inp = document.getElementById('mentor-model-input');
+  const btn = document.getElementById('btn-mentor-model-save');
+  const model = inp.value.trim();
+  if (!model) return;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const res = await fetch('/api/mentor/model', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ model })
+    });
+    if (res.ok) {
+      btn.className = 'btn-mentor-model-save saved'; btn.textContent = '✓';
+      inp.classList.add('saved');
+      document.getElementById('mentor-model-tag').textContent = model.split('/').pop();
+      setTimeout(() => {
+        btn.className = 'btn-mentor-model-save'; btn.textContent = 'Set'; btn.disabled = false;
+        inp.classList.remove('saved');
+      }, 1500);
+    } else { throw new Error(); }
+  } catch(e) {
+    btn.textContent = 'ERR'; btn.style.borderColor = 'var(--accent)';
+    setTimeout(() => {
+      btn.className = 'btn-mentor-model-save'; btn.textContent = 'Set'; btn.disabled = false;
+    }, 2000);
+  }
+}
+
+function _appendMentorMsg(role, text, model) {
+  const msgs = document.getElementById('mentor-messages');
+  // Remove empty state
+  const empty = document.getElementById('mentor-empty');
+  if (empty) empty.remove();
+
+  const el = document.createElement('div');
+  el.className = `mentor-msg ${role}`;
+
+  if (role === 'ai') {
+    // Basic markdown-ish rendering: bold, code, newlines
+    let html = text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`(.+?)`/g, '<code style="background:var(--bg);padding:1px 4px;border-radius:3px;font-size:10px">$1</code>')
+      .replace(/\n/g, '<br>');
+    el.innerHTML = html;
+    if (model) {
+      el.innerHTML += `<span class="msg-model">— ${model.split('/').pop()}</span>`;
+    }
+  } else {
+    el.textContent = text;
+  }
+
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+  return el;
+}
+
+let _mentorSending = false;
+
+async function sendMentorMessage() {
+  if (_mentorSending) return;
+  const inp = document.getElementById('mentor-input');
+  const btn = document.getElementById('btn-mentor-send');
+  const message = inp.value.trim();
+  if (!message) return;
+
+  // Show user message
+  _appendMentorMsg('user', message);
+  inp.value = '';
+  inp.style.height = 'auto';
+
+  // Show thinking indicator
+  const thinkEl = _appendMentorMsg('thinking', 'Thinking…');
+
+  _mentorSending = true;
+  inp.disabled = true;
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/mentor/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    thinkEl.remove();
+
+    if (data.error) {
+      _appendMentorMsg('error', 'Error: ' + data.error);
+    } else {
+      _appendMentorMsg('ai', data.reply, data.model);
+    }
+  } catch(e) {
+    thinkEl.remove();
+    _appendMentorMsg('error', 'Failed to reach mentor: ' + e.message);
+  } finally {
+    _mentorSending = false;
+    inp.disabled = false;
+    btn.disabled = false;
+    inp.focus();
+  }
+}
+
+// Auto-resize textarea
+document.getElementById('mentor-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+buildSidebar();
+buildPanes();
+_attachModelAutoSave();
+_attachRuleAutoSave();
+loadModels();
+loadTradeRules();
+loadMentorModel();
+loadMode();
+</script>
+</body>
+</html>

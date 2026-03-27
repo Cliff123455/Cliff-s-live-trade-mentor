@@ -1,0 +1,39 @@
+# config/risk-params.yaml
+# The Actuary reads this at startup.
+# Override individual values via .env (DAILY_DRAWDOWN_HALT_PCT, etc.)
+
+# Daily drawdown halt — session is killed when account drops this %
+daily_drawdown_halt_pct: 3.0
+
+# Max risk per single position (% of total account value)
+max_position_heat_pct: 2.0
+
+# Max combined risk across all open positions
+max_portfolio_heat_pct: 4.0
+
+# Minimum R/R ratio — setups below this are auto-vetoed
+min_rr_ratio: 2.0
+
+# Min quality score to pass The Actuary's gate (Chartist scores 1-10)
+min_quality_score: 6
+
+# Max open positions at any time (hard cap)
+max_open_positions: 4
+
+# Max total notional exposure as % of account (prevents 6x $20k positions on $100k)
+max_total_notional_pct: 60.0
+
+# VIX halt level — halt all trading if VIX exceeds this
+vix_halt_level: 35.0
+
+# Position sizing method: "atr" or "fixed_dollar"
+sizing_method: atr
+
+# ATR multiplier for stop distance (used in ATR sizing)
+atr_stop_multiplier: 1.5
+
+# Max Kelly fraction cap (prevent oversizing on high edge setups)
+kelly_cap: 0.25
+
+# Minimum sample trades before Kelly fraction is applied
+kelly_min_samples: 20

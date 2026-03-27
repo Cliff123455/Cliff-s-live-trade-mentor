@@ -1,0 +1,11 @@
+﻿OK  src.agents.market_data_agent
+ERR src.agents.news_sentiment_agent
+    ImportError: cannot import name 'GetNewsRequest' from 'alpaca.data.requests' (C:\Users\Owner\.gemini\antigravity\scratch\0CLiffClaw\CliffClaw\venv\Lib\site-packages\alpaca\data\requests.py)
+OK  src.agents.technical_analysis_agent
+ERR src.agents.risk_modeling_agent
+    NameError: name 'Optional' is not defined
+OK  src.agents.performance_agent
+OK  src.coordinator.trade_coordinator
+OK  src.execution.order_execution_agent
+OK  src.execution.position_monitor_agent
+OK  ui.app

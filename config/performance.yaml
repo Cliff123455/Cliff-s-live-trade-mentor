@@ -1,0 +1,15 @@
+# config/performance.yaml
+# The Historian reads this at startup.
+
+# Minimum completed trades before setup weight is applied
+min_sample_size: 20
+
+# Degradation flag threshold — flag a setup if rolling 20-trade win rate
+# drops more than this many percentage points below all-time win rate
+degradation_threshold_pct: 15.0
+
+# Rolling window for degradation check (number of trades)
+degradation_window: 20
+
+# How often to emit a performance update (seconds)
+update_interval_s: 30

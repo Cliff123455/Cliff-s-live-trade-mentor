@@ -1,0 +1,42 @@
+# ScalpBot / CliffClaw — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Async core
+asyncio-throttle==1.0.2
+
+# Redis message bus + state store
+redis[hiredis]>=5.0.0
+
+# Alpaca — market data + trade execution
+alpaca-py>=0.26.0
+
+# OpenRouter / OpenAI-compatible client
+openai>=1.40.0
+
+# Technical analysis
+pandas>=2.0.0
+numpy>=1.26.0
+pandas-ta>=0.3.14b0
+
+# Web UI
+flask>=3.0.0
+flask-socketio>=5.3.0
+python-socketio>=5.11.0
+eventlet>=0.36.0
+
+# Config + env
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Utilities
+httpx>=0.27.0
+python-dateutil>=2.9.0
+pytz>=2024.1
+uuid>=1.30
+
+# Logging
+structlog>=24.1.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

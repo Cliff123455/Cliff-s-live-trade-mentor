@@ -1,0 +1,24 @@
+# config/execution.yaml
+# The Sniper reads this at startup.
+
+# Order type for entry: "limit" or "market"
+entry_order_type: limit
+
+# How long to wait for a limit fill before pegging to market (milliseconds)
+limit_fill_timeout_ms: 500
+
+# Large order threshold — orders above this notional are time-sliced
+large_order_notional: 10000
+
+# Number of child orders to slice large orders into
+large_order_slices: 3
+
+# Delay between slices (seconds)
+large_order_slice_delay_s: 0.7
+
+# Time-in-force for all orders: "day", "gtc", "ioc", "fok"
+time_in_force: day
+
+# Paper vs live — controlled by ALPACA_BASE_URL in .env.
+# This flag is just a safety double-check.
+paper_mode: true
