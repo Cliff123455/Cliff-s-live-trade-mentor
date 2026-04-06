@@ -1,0 +1,40 @@
+# config/backtest_matrix.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# 27-Configuration Backtest Matrix for Markov Model Impact Testing
+#
+# Each configuration varies three Markov parameters (3 levels × 3 params = 27):
+#   1. conviction_threshold  — entry confidence gate      [4.5, 5.5, 6.5]
+#   2. markov_decay_factor   — transition memory decay     [0.90, 0.95, 0.99]
+#   3. markov_window_size    — price observation window    [10, 20, 40]
+#
+# The General (manager) model rotates through the top 5 finance models.
+# All other agents use the base model (openai/chatgpt-4o-latest).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Base model for all non-General agents
+base_model: "openai/chatgpt-4o-latest"
+
+# Top 5 finance-focused models for The General (manager) — round-robin
+general_models:
+  - "anthropic/claude-opus-4-5"
+  - "openai/o1"
+  - "google/gemini-2.5-pro-preview-03-25"
+  - "anthropic/claude-sonnet-4-5-20250514"
+  - "deepseek/deepseek-r1"
+
+# Markov parameter grid (3 × 3 × 3 = 27 combinations)
+markov_grid:
+  conviction_threshold: [4.5, 5.5, 6.5]
+  decay_factor:         [0.90, 0.95, 0.99]
+  window_size:          [10, 20, 40]
+
+# Backtest defaults
+backtest_defaults:
+  speed: 0            # MAX speed for batch runs
+  slippage_bps: 5.0
+  grace_s: 15.0
+  with_wire: false
+
+# Dates to test (add more for multi-day testing)
+replay_dates:
+  - "2026-03-24"
